@@ -1,6 +1,6 @@
 import { SpaceX } from "./api/spacex";
 import * as d3 from "d3";
-import * as Geo from './geo.json';
+import * as Geo from "./geo.json";
 
 let mapSvg;
 let mapProjection;
@@ -8,16 +8,37 @@ let mapProjection;
 document.addEventListener("DOMContentLoaded", setup);
 
 function setup() {
-    const spaceX = new SpaceX()
+    const spaceX = new SpaceX();
 
-    spaceX.launches().then(data => {
-        const listContainer = document.getElementById("listContainer");
-        renderLaunches(data.results, listContainer);
-        spaceX.pads().then(uniquePads => drawMap(uniquePads));
-    }).catch(error => {
-        console.error("Ошибка:", error);
-    })
+    Promise.all([spaceX.launches(), spaceX.pads()])
+        .then(([launchesData, padsData]) => {
+            const listContainer = document.getElementById("listContainer");
 
+            renderLaunches(launchesData.results, listContainer);
+
+            let sumData = new Map()
+            console.log(launchesData)
+
+            padsData.results.forEach((element) => {
+                if (element.id != null && element.longitude != null && element.latitude != null) {
+                    sumData.set(String(element.id), element.longitude);
+                }
+            })
+
+            launchesData.results.forEach((element) => {
+                const pad = element.pad
+                if (pad.id != null && pad.longitude != null && pad.latitude != null) {
+                    sumData.set(String(pad.id), pad);
+                }
+            })
+
+            let allPads = [...sumData.values()]
+
+            drawMap(allPads, mapProjection);
+        })
+        .catch(error => {
+            console.error("Ошибка при получении данных:", error);
+        });
 }
 
 function renderLaunches(launches, container) {
@@ -29,13 +50,11 @@ function renderLaunches(launches, container) {
         item.innerHTML = launch.name;
         item.style.cursor = "pointer";
 
-
         item.addEventListener("mouseenter", () => {
             const pad = launch.pad;
             if (!pad || !pad.longitude || !pad.latitude) return;
 
             const [x, y] = mapProjection([pad.longitude, pad.latitude]);
-
             const highlightLayer = mapSvg.select("#highlight-layer");
 
             highlightLayer.append("circle")
@@ -66,6 +85,7 @@ function renderLaunches(launches, container) {
 
     container.replaceChildren(list);
 }
+
 function drawMap(padsData) {
     const width = 640;
     const height = 480;
@@ -88,17 +108,21 @@ function drawMap(padsData) {
         .domain([0, 1])
         .range(["#4e79a7", "#f28e2b"]);
 
+    // Поддержка экспорта GeoJSON в Parcel (на случай наличия .default)
+    const features = Geo.default ? Geo.default.features : Geo.features;
+
     mapSvg.append("g")
         .selectAll("path")
-        .data(Geo.features)
+        .data(features)
         .enter()
         .append("path")
         .attr("class", "topo")
         .attr("d", d3.geoPath().projection(mapProjection))
-        .attr("fill", function (d) { return colorScale(0); })
+        .attr("fill", function () { return colorScale(0); })
         .style("opacity", 0.7);
 
-    if (padsData) {
+
+    if (padsData && Array.isArray(padsData)) {
         mapSvg.append("g")
             .selectAll("circle")
             .data(padsData)
@@ -118,5 +142,6 @@ function drawMap(padsData) {
             .style("stroke-width", 1)
             .style("opacity", 0.8);
     }
+
     mapSvg.append("g").attr("id", "highlight-layer");
 }
